@@ -40,7 +40,8 @@ export type {
  *     any element with `data-ballad-track="signup"` — with the person's
  *     email when the site passes one (`track("signup", { email })`, or a
  *     form marked `data-ballad-identify`), so Ballad can hand the contact
- *     to a CRM. Nothing identifying is sent unless the site chooses to.
+ *     to a CRM. Nothing identifying is sent unless the site chooses to,
+ *     and never when the visitor signals Global Privacy Control.
  *
  * Transport is a plain fetch with keepalive, no credentials, no cookies, no
  * user agent or IP kept by Ballad beyond the edge's country. Nothing here
@@ -181,12 +182,15 @@ export function init(options: BeaconOptions): Beacon | null {
   // 3. Conversions.
   const track = (name: string, identity?: Identity | null) => {
     if (!isValidEventName(name)) return;
+    // Under Global Privacy Control nothing identifying leaves the page —
+    // not even an identity the site passed. The conversion still counts,
+    // anonymously; the site can sync its own signup records server-side.
     send(
       conversionPayload({
         name,
         path: location.pathname,
         record: load(),
-        identity: normalizeIdentity(identity),
+        identity: gpc ? null : normalizeIdentity(identity),
       }),
     );
   };

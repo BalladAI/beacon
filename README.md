@@ -69,7 +69,7 @@ If you tell Ballad who signed up, the conversion becomes a contact — with the 
 track("signup", { email: user.email, name: user.name, company: user.company });
 ```
 
-Only the email is required; nothing identifying is sent unless you pass it. For a plain form, let the beacon read the email input itself:
+Only the email is required; nothing identifying is sent unless you pass it, and never when the visitor signals Global Privacy Control — the conversion is still counted, anonymously. For a plain form, let the beacon read the inputs itself:
 
 ```html
 <form data-ballad-track="signup" data-ballad-identify>
@@ -77,6 +77,8 @@ Only the email is required; nothing identifying is sent unless you pass it. For 
   …
 </form>
 ```
+
+The rule for what an identified form sends, exactly: the email from `input[type="email"]`, else `input[name="email"]`; the name from `input[name="name"]`, else `input[autocomplete="name"]`; the company from `input[name="company"]`, else `input[autocomplete="organization"]`. Nothing else on the form is read, and a form without the attribute sends no identity at all.
 
 `window.ballad.track("signup")` keeps working too, for code written against the script tag.
 

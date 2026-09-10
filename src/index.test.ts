@@ -112,6 +112,10 @@ describe("beacon", () => {
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
     // The landing itself is still counted (no identifier in it).
     expect(sent[0]).toMatchObject({ type: "landing", ref: "tok" });
+    // And an identity the site passes is dropped: the conversion stays anonymous.
+    getBeacon()?.track("signup", { email: "ada@example.com" });
+    expect(sent[sent.length - 1]).toMatchObject({ type: "conversion", name: "signup" });
+    expect((sent[sent.length - 1] as { identity?: unknown }).identity).toBeUndefined();
     Object.defineProperty(navigator, "globalPrivacyControl", { value: undefined, configurable: true });
   });
 
