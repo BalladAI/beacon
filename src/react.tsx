@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { type BeaconOptions, init } from "./index";
 
-export { track, type Beacon, type BeaconOptions } from "./index";
+export { type Beacon, type BeaconOptions, type Identity, track } from "./index";
 
 /**
  * The beacon as a component: render it once in your root layout. Starts on

@@ -61,15 +61,32 @@ track("signup");
 
 Event names are short identifiers: letters, digits, `_` and `-`, up to 40 characters.
 
+### Say who converted
+
+If you tell Ballad who signed up, the conversion becomes a contact — with the post that first brought them and the last one before they converted — which Ballad can hand to your CRM.
+
+```ts
+track("signup", { email: user.email, name: user.name, company: user.company });
+```
+
+Only the email is required; nothing identifying is sent unless you pass it. For a plain form, let the beacon read the email input itself:
+
+```html
+<form data-ballad-track="signup" data-ballad-identify>
+  <input type="email" name="email" />
+  …
+</form>
+```
+
 `window.ballad.track("signup")` keeps working too, for code written against the script tag.
 
 ## What it sends
 
 - A `landing` once per tab, with the page, any `?ref=` token from a Ballad link, and the referring site's host.
 - A `pageview` on each later navigation.
-- A `conversion` with the visitor's first and last touch, so Ballad can attribute it.
+- A `conversion` with the visitor's first and last touch, so Ballad can attribute it — and an identity (email, name, company) only when you pass one.
 
-Nothing else. No user agent, no IP, no identifier. The first and last touch live in `localStorage` on your own domain for 90 days. Visitors with Global Privacy Control on are never stored.
+Nothing else. No user agent, no IP, no identifier you didn't choose to send. The first and last touch live in `localStorage` on your own domain for 90 days. Visitors with Global Privacy Control on are never stored.
 
 ## Options
 

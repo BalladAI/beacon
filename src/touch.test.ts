@@ -88,3 +88,23 @@ describe("payloads", () => {
     expect(isValidEventName(42)).toBe(false);
   });
 });
+
+describe("identity", () => {
+  it("normalizes a usable identity and rejects the rest", async () => {
+    const { normalizeIdentity, identityFromForm } = await import("./touch");
+    expect(normalizeIdentity({ email: " Ada@Example.com ", name: "Ada  L", company: "Analytical" })).toEqual({
+      email: "ada@example.com",
+      name: "Ada L",
+      company: "Analytical",
+    });
+    expect(normalizeIdentity({ email: "a@b.co" })).toEqual({ email: "a@b.co" });
+    expect(normalizeIdentity({ email: "nope" })).toBeNull();
+    expect(normalizeIdentity("a@b.co")).toBeNull();
+    expect(normalizeIdentity(undefined)).toBeNull();
+    const form = {
+      querySelector: (sel: string) =>
+        sel.includes("email") ? { value: "Form@Example.com" } : sel.includes('name="company"') ? { value: "Acme" } : null,
+    };
+    expect(identityFromForm(form)).toEqual({ email: "form@example.com", company: "Acme" });
+  });
+});

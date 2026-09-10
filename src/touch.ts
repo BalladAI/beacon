@@ -33,12 +33,17 @@ export type LandingPayload = {
   referrer?: string;
 };
 export type PageviewPayload = { type: "pageview"; path: string };
+/** Who converted, when the site chooses to say: the email its signup form
+ * already has, optionally a name and company. Sent only when passed. */
+export type Identity = { email: string; name?: string; company?: string };
+
 export type ConversionPayload = {
   type: "conversion";
   name: string;
   path: string;
   first?: Touch;
   last?: Touch;
+  identity?: Identity;
 };
 export type Payload = LandingPayload | PageviewPayload | ConversionPayload;
 
@@ -117,13 +122,47 @@ export function conversionPayload(params: {
   name: string;
   path: string;
   record: TouchRecord | null;
+  identity?: Identity | null;
 }): ConversionPayload {
   return {
     type: "conversion",
     name: params.name,
     path: params.path,
     ...(params.record ? { first: params.record.first, last: params.record.last } : {}),
+    ...(params.identity ? { identity: params.identity } : {}),
   };
+}
+
+const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[a-z]{2,}$/i;
+const trim = (v: unknown, max: number): string | undefined => {
+  if (typeof v !== "string") return undefined;
+  const s = v.replace(/\s+/g, " ").trim();
+  return s ? s.slice(0, max) : undefined;
+};
+
+/** A usable identity, or null: a valid email (lowercased) is required;
+ * name and company ride along when present; anything else is dropped. */
+export function normalizeIdentity(raw: unknown): Identity | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const email = trim(o.email, 254)?.toLowerCase();
+  if (!email || !EMAIL_RE.test(email)) return null;
+  const name = trim(o.name, 120);
+  const company = trim(o.company, 120);
+  return { email, ...(name ? { name } : {}), ...(company ? { company } : {}) };
+}
+
+/** The identity a form volunteers: its email input, plus name and company
+ * inputs when it has them. Only for forms marked `data-ballad-identify`. */
+export function identityFromForm(form: {
+  querySelector: (sel: string) => { value?: string } | null;
+}): Identity | null {
+  const val = (sel: string) => form.querySelector(sel)?.value;
+  return normalizeIdentity({
+    email: val('input[type="email"]') ?? val('input[name="email"]'),
+    name: val('input[name="name"]') ?? val('input[autocomplete="name"]'),
+    company: val('input[name="company"]') ?? val('input[autocomplete="organization"]'),
+  });
 }
 
 /** Conversion names are short identifiers; anything else is dropped. */

@@ -69,6 +69,32 @@ describe("beacon", () => {
     expect(sent[sent.length - 1]).toMatchObject({ name: "demo_request" });
   });
 
+  it("sends an identity with a conversion when given one, and queues it", () => {
+    track("signup", { email: "Queued@Example.com", name: "Q" });
+    init({ site: "site-6" });
+    const queued = sent.find((p) => (p as { type: string }).type === "conversion") as { identity?: unknown };
+    expect(queued.identity).toEqual({ email: "queued@example.com", name: "Q" });
+    getBeacon()?.track("demo_request", { email: "bad" });
+    expect((sent[sent.length - 1] as { identity?: unknown }).identity).toBeUndefined();
+    getBeacon()?.track("demo_request");
+    expect((sent[sent.length - 1] as { identity?: unknown }).identity).toBeUndefined();
+  });
+
+  it("reads the email from a data-ballad-identify form on submit", () => {
+    init({ site: "site-7" });
+    const form = document.createElement("form");
+    form.setAttribute("data-ballad-track", "signup");
+    form.setAttribute("data-ballad-identify", "");
+    const email = document.createElement("input");
+    email.type = "email";
+    email.value = "Form@Example.com";
+    form.appendChild(email);
+    document.body.appendChild(form);
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    expect(sent[sent.length - 1]).toMatchObject({ type: "conversion", name: "signup", identity: { email: "form@example.com" } });
+    form.remove();
+  });
+
   it("tracks data-ballad-track clicks", () => {
     init({ site: "site-4" });
     const btn = document.createElement("button");

@@ -2,7 +2,10 @@ import {
   conversionPayload,
   DEFAULT_ENDPOINT,
   eventsUrl,
+  type Identity,
+  identityFromForm,
   isValidEventName,
+  normalizeIdentity,
   landingPayload,
   nextTouchRecord,
   parseTouchRecord,
@@ -17,6 +20,7 @@ import {
 
 export type {
   ConversionPayload,
+  Identity,
   LandingPayload,
   PageviewPayload,
   Payload,
@@ -33,7 +37,10 @@ export type {
  *  2. reports a `landing` once per tab and a `pageview` on later navigations
  *     (SPA-aware: pushState / replaceState / popstate);
  *  3. reports a `conversion` on `track("signup")`, or on a click / submit of
- *     any element with `data-ballad-track="signup"`.
+ *     any element with `data-ballad-track="signup"` — with the person's
+ *     email when the site passes one (`track("signup", { email })`, or a
+ *     form marked `data-ballad-identify`), so Ballad can hand the contact
+ *     to a CRM. Nothing identifying is sent unless the site chooses to.
  *
  * Transport is a plain fetch with keepalive, no credentials, no cookies, no
  * user agent or IP kept by Ballad beyond the edge's country. Nothing here
@@ -53,8 +60,9 @@ export type BeaconOptions = {
 };
 
 export type Beacon = {
-  /** Report a named conversion ("signup", "demo_request"…). */
-  track: (name: string) => void;
+  /** Report a named conversion ("signup", "demo_request"…), optionally
+   * with who converted. */
+  track: (name: string, identity?: Identity | null) => void;
   /** The site token this beacon reports for. */
   site: string;
   /** Stop reporting and remove the navigation hooks. */
@@ -62,8 +70,8 @@ export type Beacon = {
 };
 
 type BalladGlobal = {
-  track: (name: string) => void;
-  /** Calls made before init: `[["track", "signup"]]`. */
+  track: (name: string, identity?: Identity | null) => void;
+  /** Calls made before init: `[["track", "signup", { email }]]`. */
   q: unknown[][];
 };
 
@@ -171,9 +179,16 @@ export function init(options: BeaconOptions): Beacon | null {
   }
 
   // 3. Conversions.
-  const track = (name: string) => {
+  const track = (name: string, identity?: Identity | null) => {
     if (!isValidEventName(name)) return;
-    send(conversionPayload({ name, path: location.pathname, record: load() }));
+    send(
+      conversionPayload({
+        name,
+        path: location.pathname,
+        record: load(),
+        identity: normalizeIdentity(identity),
+      }),
+    );
   };
   const onClick = (e: Event) => {
     safe(() => {
@@ -184,9 +199,11 @@ export function init(options: BeaconOptions): Beacon | null {
   };
   const onSubmit = (e: Event) => {
     safe(() => {
-      const form = e.target as Element | null;
+      const form = e.target as HTMLFormElement | null;
       const name = form?.getAttribute?.("data-ballad-track");
-      if (name) track(name);
+      if (!name) return;
+      const identify = form?.hasAttribute?.("data-ballad-identify");
+      track(name, identify && form ? identityFromForm(form) : null);
     }, undefined);
   };
   if (trackAttributes) {
@@ -201,7 +218,8 @@ export function init(options: BeaconOptions): Beacon | null {
   window.ballad = { track, q: [] };
   for (const call of queued)
     safe(() => {
-      if (Array.isArray(call) && call[0] === "track") track(String(call[1]));
+      if (Array.isArray(call) && call[0] === "track")
+        track(String(call[1]), normalizeIdentity(call[2]));
     }, undefined);
 
   const beacon: Beacon = {
@@ -232,15 +250,15 @@ export function init(options: BeaconOptions): Beacon | null {
  * server) the call is queued and replayed once the beacon starts, so a
  * signup handler never has to know whether the beacon loaded first.
  */
-export function track(name: string): void {
+export function track(name: string, identity?: Identity | null): void {
   if (current) {
-    current.track(name);
+    current.track(name, identity);
     return;
   }
   if (typeof window === "undefined") return;
   safe(() => {
     const g = (window.ballad ??= { track: () => {}, q: [] });
-    g.q.push(["track", name]);
+    g.q.push(identity ? ["track", name, identity] : ["track", name]);
   }, undefined);
 }
 
