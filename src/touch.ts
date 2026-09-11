@@ -173,6 +173,64 @@ export function identifyPayload(params: {
   return out;
 }
 
+/* ---------------- Cross-origin handoff ---------------- */
+
+/** The query parameter that carries a touch record to another origin. */
+export const HANDOFF_PARAM = "bt";
+
+function b64url(s: string): string {
+  return btoa(unescape(encodeURIComponent(s)))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+function unb64url(s: string): string {
+  let t = s.replace(/-/g, "+").replace(/_/g, "/");
+  while (t.length % 4) t += "=";
+  return decodeURIComponent(escape(atob(t)));
+}
+
+function validTouch(t: unknown): t is Touch {
+  if (!t || typeof t !== "object") return false;
+  const v = t as Record<string, unknown>;
+  if (typeof v.path !== "string" || v.path.length > 512) return false;
+  if (typeof v.at !== "number" || !Number.isFinite(v.at)) return false;
+  if (v.ref != null && (typeof v.ref !== "string" || v.ref.length > 16))
+    return false;
+  if (v.host != null && (typeof v.host !== "string" || v.host.length > 253))
+    return false;
+  return true;
+}
+
+/** A touch record as a URL-safe string for the `bt` parameter. */
+export function encodeHandoff(record: TouchRecord): string {
+  return b64url(JSON.stringify({ f: record.first, l: record.last }));
+}
+
+/** The record carried by a `bt` parameter, or null when it's malformed,
+ * expired, or not ours. */
+export function decodeHandoff(raw: string, now: number): TouchRecord | null {
+  try {
+    const v = JSON.parse(unb64url(raw)) as { f?: unknown; l?: unknown } | null;
+    if (!v || !validTouch(v.f)) return null;
+    if (now - v.f.at >= TOUCH_TTL_MS || v.f.at > now + 60_000) return null;
+    return { first: v.f, last: validTouch(v.l) ? v.l : v.f };
+  } catch {
+    return null;
+  }
+}
+
+/** Whether a link's host is one the touch should follow the visitor to. */
+export function isHandoffHost(
+  hostname: string,
+  ownHost: string,
+  hosts: readonly string[],
+): boolean {
+  const h = hostname.toLowerCase();
+  if (!h || h === ownHost.toLowerCase()) return false;
+  return hosts.some((x) => x.trim().toLowerCase() === h);
+}
+
 export function normalizeIdentity(raw: unknown): Identity | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;

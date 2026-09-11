@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  decodeHandoff,
+  encodeHandoff,
   conversionPayload,
   eventsUrl,
   isValidEventName,
@@ -106,5 +108,23 @@ describe("identity", () => {
         sel.includes("email") ? { value: "Form@Example.com" } : sel.includes('name="company"') ? { value: "Acme" } : null,
     };
     expect(identityFromForm(form)).toEqual({ email: "form@example.com", company: "Acme" });
+  });
+});
+
+describe("handoff", () => {
+  const now = 1_700_000_000_000;
+  it("round-trips a record through the bt parameter", () => {
+    const rec = {
+      first: { ref: "abc123", path: "/blog/why", host: "news.ycombinator.com", at: now - 5000 },
+      last: { path: "/pricing", at: now - 1000 },
+    };
+    const raw = encodeHandoff(rec);
+    expect(raw).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(decodeHandoff(raw, now)).toEqual(rec);
+  });
+  it("rejects garbage, an expired first touch, and oversized fields", () => {
+    expect(decodeHandoff("not base64!", now)).toBeNull();
+    expect(decodeHandoff(encodeHandoff({ first: { path: "/", at: now - 91 * 864e5 }, last: { path: "/", at: now } }), now)).toBeNull();
+    expect(decodeHandoff(encodeHandoff({ first: { path: "/", at: now, ref: "x".repeat(17) }, last: { path: "/", at: now } }), now)).toBeNull();
   });
 });

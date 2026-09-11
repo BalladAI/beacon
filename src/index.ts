@@ -1,10 +1,14 @@
 import {
   conversionPayload,
+  decodeHandoff,
   DEFAULT_ENDPOINT,
+  encodeHandoff,
   eventsUrl,
+  HANDOFF_PARAM,
   type Identity,
   identityFromForm,
   identifyPayload,
+  isHandoffHost,
   isValidEventName,
   normalizeIdentity,
   landingPayload,
@@ -19,6 +23,11 @@ import {
   type TouchRecord,
 } from "./touch";
 
+export {
+  decodeHandoff,
+  encodeHandoff,
+  HANDOFF_PARAM,
+} from "./touch";
 export type {
   ConversionPayload,
   Identity,
@@ -60,6 +69,12 @@ export type BeaconOptions = {
   respectGpc?: boolean;
   /** Wire `data-ballad-track` clicks and submits (default true). */
   trackAttributes?: boolean;
+  /** Hosts the visitor's touch should follow them to — your app, if it
+   * lives on another origin (e.g. `["app.example.com"]`). Links to these
+   * hosts get a `bt` parameter carrying the stored touch; a beacon on
+   * that origin adopts it on arrival, so a signup there still knows the
+   * post that brought the person. Never under Global Privacy Control. */
+  handoff?: string[];
 };
 
 export type Beacon = {
@@ -120,6 +135,7 @@ export function init(options: BeaconOptions): Beacon | null {
   const trackNavigation = options.trackNavigation ?? true;
   const respectGpc = options.respectGpc ?? true;
   const trackAttributes = options.trackAttributes ?? true;
+  const handoffHosts = (options.handoff ?? []).filter(Boolean);
   const now = () => Date.now();
 
   const send = (payload: Payload) => {
@@ -145,6 +161,23 @@ export function init(options: BeaconOptions): Beacon | null {
     location.hostname,
   );
   const gpc = respectGpc && safe(() => !!navigator.globalPrivacyControl, false);
+
+  // 0. A touch handed over from another origin (the marketing site sending
+  // the visitor to the app). Adopted only when this origin has none of its
+  // own; the parameter is stripped either way so it never lingers in URLs.
+  const handed = safe(() => {
+    const u = new URL(location.href);
+    const raw = u.searchParams.get(HANDOFF_PARAM);
+    if (!raw) return null;
+    u.searchParams.delete(HANDOFF_PARAM);
+    history.replaceState(history.state, "", u.toString());
+    return raw;
+  }, null);
+  if (handed && !gpc && !load()) {
+    const record = decodeHandoff(handed, now());
+    if (record) save(record);
+  }
+
   const existing = load();
   if (shouldRecordTouch({ gpc, ref, host, existing })) {
     const touch: Touch = {
@@ -228,6 +261,25 @@ export function init(options: BeaconOptions): Beacon | null {
     document.addEventListener("click", onClick, true);
     document.addEventListener("submit", onSubmit, true);
   }
+  // Links to a handoff host carry the touch across.
+  const onHandoffClick = (e: Event) => {
+    safe(() => {
+      if (gpc) return;
+      const a = (e.target as Element | null)?.closest?.("a[href]") as
+        | HTMLAnchorElement
+        | null
+        | undefined;
+      if (!a) return;
+      const u = new URL(a.href, location.href);
+      if (!isHandoffHost(u.hostname, location.hostname, handoffHosts)) return;
+      const record = load();
+      if (!record) return;
+      u.searchParams.set(HANDOFF_PARAM, encodeHandoff(record));
+      a.href = u.toString();
+    }, undefined);
+  };
+  if (handoffHosts.length)
+    document.addEventListener("click", onHandoffClick, true);
 
   // The `window.ballad` global the script-tag beacon also provides, so
   // `window.ballad.track("signup")` in existing code keeps working, and
@@ -256,6 +308,8 @@ export function init(options: BeaconOptions): Beacon | null {
           document.removeEventListener("click", onClick, true);
           document.removeEventListener("submit", onSubmit, true);
         }
+        if (handoffHosts.length)
+          document.removeEventListener("click", onHandoffClick, true);
         if (window.ballad?.track === track) delete window.ballad;
       }, undefined);
       if (current === beacon) current = null;

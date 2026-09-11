@@ -100,6 +100,28 @@ with the post that first brought them. Nothing is counted as a conversion.
 Under Global Privacy Control nothing is sent. Before `init` the call is
 queued, and `window.ballad.identify({ email })` works for script-tag sites.
 
+## Hand the touch to your app
+
+If people read your site on one origin and sign up on another (say
+`www.example.com` and `app.example.com`), the touch the browser kept on the
+site can't be seen from the app. Tell the site's beacon where the visitor is
+going, and mount the beacon on the app too:
+
+```tsx
+// on the marketing site
+<BalladBeacon site={token} handoff={["app.example.com"]} />
+
+// in the app (same site token)
+<BalladBeacon site={token} />
+```
+
+Links to a handoff host get a short `bt` parameter carrying the stored touch.
+The app's beacon adopts it on arrival, strips it from the URL, and from then
+on `track("signup", { email })` or `identify(...)` in the app report the post
+that first brought the person. An origin that already has a touch of its own
+keeps it. Nothing is carried under Global Privacy Control. Script tag:
+`data-handoff="app.example.com"`.
+
 ## What it sends
 
 - A `landing` once per tab, with the page, any `?ref=` token from a Ballad link, and the referring site's host.

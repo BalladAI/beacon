@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getBeacon, init, track } from "./index";
-import { SESSION_KEY, STORAGE_KEY } from "./touch";
+import { encodeHandoff, SESSION_KEY, STORAGE_KEY } from "./touch";
 
 /** The beacon against jsdom: what it sends, and when. */
 describe("beacon", () => {
@@ -143,6 +143,49 @@ describe("beacon", () => {
     b?.identify({ email: "gpc@example.com" });
     expect(sent.length).toBe(before);
     Object.defineProperty(navigator, "globalPrivacyControl", { value: false, configurable: true });
+  });
+
+  it("adopts a handed-off touch from the URL and strips the parameter", () => {
+    const rec = {
+      first: { ref: "hn1", path: "/blog/why", host: "news.ycombinator.com", at: Date.now() - 5000 },
+      last: { path: "/pricing", at: Date.now() - 1000 },
+    };
+    history.replaceState(null, "", `/signin?bt=${encodeHandoff(rec)}&next=%2Fapp`);
+    init({ site: "site-10" });
+    expect(location.search).toBe("?next=%2Fapp");
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
+    expect(stored.first).toEqual(rec.first);
+    const landing = sent.find((p) => (p as { type: string }).type === "landing");
+    expect(landing).toBeDefined();
+  });
+
+  it("keeps an existing touch over a handed-off one", () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ first: { path: "/here", at: Date.now() - 9000 }, last: { path: "/here", at: Date.now() - 9000 } }),
+    );
+    history.replaceState(null, "", `/?bt=${encodeHandoff({ first: { path: "/there", at: Date.now() }, last: { path: "/there", at: Date.now() } })}`);
+    init({ site: "site-11" });
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null").first.path).toBe("/here");
+    expect(location.search).toBe("");
+  });
+
+  it("carries the touch on links to handoff hosts, and only those", () => {
+    init({ site: "site-12", handoff: ["app.example.com"] });
+    const to = document.createElement("a");
+    to.href = "https://app.example.com/signin?next=%2Fdash";
+    const elsewhere = document.createElement("a");
+    elsewhere.href = "https://other.example.com/";
+    document.body.append(to, elsewhere);
+    for (const a of [to, elsewhere]) a.addEventListener("click", (e) => e.preventDefault());
+    to.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    elsewhere.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    const u = new URL(to.href);
+    expect(u.searchParams.get("next")).toBe("/dash");
+    expect(u.searchParams.get("bt")).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(new URL(elsewhere.href).searchParams.get("bt")).toBeNull();
+    to.remove();
+    elsewhere.remove();
   });
 
   it("is idempotent per site and replaceable", () => {
