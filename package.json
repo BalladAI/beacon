@@ -1,6 +1,6 @@
 {
   "name": "@balladlabs/beacon",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Ballad's site beacon as a package: first-party attribution for your website — which post brought the visit, and the signup after it.",
   "license": "MIT",
   "repository": {

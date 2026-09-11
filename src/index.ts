@@ -4,6 +4,7 @@ import {
   eventsUrl,
   type Identity,
   identityFromForm,
+  identifyPayload,
   isValidEventName,
   normalizeIdentity,
   landingPayload,
@@ -21,6 +22,7 @@ import {
 export type {
   ConversionPayload,
   Identity,
+  IdentifyPayload,
   LandingPayload,
   PageviewPayload,
   Payload,
@@ -64,6 +66,10 @@ export type Beacon = {
   /** Report a named conversion ("signup", "demo_request"…), optionally
    * with who converted. */
   track: (name: string, identity?: Identity | null) => void;
+  /** Say who a returning visitor is (call on login). The touch stored in
+   * their browser backfills the person in Ballad; nothing is counted.
+   * Under Global Privacy Control nothing is sent. */
+  identify: (identity: Identity | null | undefined) => void;
   /** The site token this beacon reports for. */
   site: string;
   /** Stop reporting and remove the navigation hooks. */
@@ -72,7 +78,9 @@ export type Beacon = {
 
 type BalladGlobal = {
   track: (name: string, identity?: Identity | null) => void;
-  /** Calls made before init: `[["track", "signup", { email }]]`. */
+  identify?: (identity: Identity | null | undefined) => void;
+  /** Calls made before init: `[["track", "signup", { email }]]`,
+   * `[["identify", { email }]]`. */
   q: unknown[][];
 };
 
@@ -194,6 +202,12 @@ export function init(options: BeaconOptions): Beacon | null {
       }),
     );
   };
+  const identify = (identity: Identity | null | undefined) => {
+    if (gpc) return;
+    const who = normalizeIdentity(identity);
+    if (!who) return;
+    send(identifyPayload({ path: location.pathname, record: load(), identity: who }));
+  };
   const onClick = (e: Event) => {
     safe(() => {
       const el = (e.target as Element | null)?.closest?.("[data-ballad-track]");
@@ -219,16 +233,18 @@ export function init(options: BeaconOptions): Beacon | null {
   // `window.ballad.track("signup")` in existing code keeps working, and
   // calls queued before init are replayed.
   const queued = safe(() => window.ballad?.q ?? [], []);
-  window.ballad = { track, q: [] };
+  window.ballad = { track, identify, q: [] };
   for (const call of queued)
     safe(() => {
-      if (Array.isArray(call) && call[0] === "track")
-        track(String(call[1]), normalizeIdentity(call[2]));
+      if (!Array.isArray(call)) return;
+      if (call[0] === "track") track(String(call[1]), normalizeIdentity(call[2]));
+      else if (call[0] === "identify") identify(normalizeIdentity(call[1]));
     }, undefined);
 
   const beacon: Beacon = {
     site,
     track,
+    identify,
     destroy: () => {
       safe(() => {
         if (trackNavigation) {
@@ -266,10 +282,26 @@ export function track(name: string, identity?: Identity | null): void {
   }, undefined);
 }
 
+/**
+ * Say who the current visitor is (call on login). Queued before `init`
+ * like `track`. Under Global Privacy Control nothing is sent.
+ */
+export function identify(identity: Identity | null | undefined): void {
+  if (current) {
+    current.identify(identity);
+    return;
+  }
+  if (typeof window === "undefined") return;
+  safe(() => {
+    const g = (window.ballad ??= { track: () => {}, q: [] });
+    g.q.push(["identify", identity]);
+  }, undefined);
+}
+
 /** The running beacon, if any. */
 export function getBeacon(): Beacon | null {
   return current;
 }
 
-export const ballad = { init, track, getBeacon };
+export const ballad = { init, track, identify, getBeacon };
 export default ballad;

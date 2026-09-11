@@ -45,7 +45,21 @@ export type ConversionPayload = {
   last?: Touch;
   identity?: Identity;
 };
-export type Payload = LandingPayload | PageviewPayload | ConversionPayload;
+/** Who a returning visitor is (on login). Carries the touch the browser kept
+ * so Ballad can backfill the person; nothing is counted. */
+export type IdentifyPayload = {
+  type: "identify";
+  path: string;
+  first?: Touch;
+  last?: Touch;
+  identity: Identity;
+};
+
+export type Payload =
+  | LandingPayload
+  | PageviewPayload
+  | ConversionPayload
+  | IdentifyPayload;
 
 /** The events URL for a site token, on Ballad's app origin (or a mirror). */
 export function eventsUrl(endpoint: string, site: string): string {
@@ -142,6 +156,23 @@ const trim = (v: unknown, max: number): string | undefined => {
 
 /** A usable identity, or null: a valid email (lowercased) is required;
  * name and company ride along when present; anything else is dropped. */
+export function identifyPayload(params: {
+  path: string;
+  record: TouchRecord | null;
+  identity: Identity;
+}): IdentifyPayload {
+  const out: IdentifyPayload = {
+    type: "identify",
+    path: params.path,
+    identity: params.identity,
+  };
+  if (params.record) {
+    out.first = params.record.first;
+    out.last = params.record.last;
+  }
+  return out;
+}
+
 export function normalizeIdentity(raw: unknown): Identity | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;

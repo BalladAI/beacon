@@ -82,6 +82,24 @@ The rule for what an identified form sends, exactly: the email from `input[type=
 
 `window.ballad.track("signup")` keeps working too, for code written against the script tag.
 
+## Say who a returning visitor is
+
+Signups the beacon saw before your form passed an email — or any visitor who
+comes back — can still become a person in Ballad. Call `identify` when a user
+logs in:
+
+```ts
+import { identify } from "@balladlabs/beacon";
+
+identify({ email: user.email, name: user.name, company: user.company });
+```
+
+The beacon sends the identity together with the first and last Ballad touch
+it kept in that browser (90 days), so the person appears on the People tab
+with the post that first brought them. Nothing is counted as a conversion.
+Under Global Privacy Control nothing is sent. Before `init` the call is
+queued, and `window.ballad.identify({ email })` works for script-tag sites.
+
 ## What it sends
 
 - A `landing` once per tab, with the page, any `?ref=` token from a Ballad link, and the referring site's host.

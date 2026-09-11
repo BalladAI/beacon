@@ -119,6 +119,32 @@ describe("beacon", () => {
     Object.defineProperty(navigator, "globalPrivacyControl", { value: undefined, configurable: true });
   });
 
+  it("identifies a returning visitor with the stored touch, queued or live", () => {
+    window.ballad = { track: () => {}, q: [["identify", { email: "Back@Example.com" }]] };
+    const b = init({ site: "site-8" });
+    const queued = sent.find((p) => (p as { type: string }).type === "identify") as {
+      identity?: unknown;
+      first?: unknown;
+    };
+    expect(queued.identity).toEqual({ email: "back@example.com" });
+    expect(queued.first).toBeDefined();
+    b?.identify({ email: "not an email" });
+    expect(sent.filter((p) => (p as { type: string }).type === "identify")).toHaveLength(1);
+    b?.identify({ email: "again@example.com", company: "Acme" });
+    const last = sent[sent.length - 1] as { type: string; identity?: unknown };
+    expect(last.type).toBe("identify");
+    expect(last.identity).toEqual({ email: "again@example.com", company: "Acme" });
+  });
+
+  it("sends nothing on identify under Global Privacy Control", () => {
+    Object.defineProperty(navigator, "globalPrivacyControl", { value: true, configurable: true });
+    const b = init({ site: "site-9" });
+    const before = sent.length;
+    b?.identify({ email: "gpc@example.com" });
+    expect(sent.length).toBe(before);
+    Object.defineProperty(navigator, "globalPrivacyControl", { value: false, configurable: true });
+  });
+
   it("is idempotent per site and replaceable", () => {
     const a = init({ site: "same" });
     expect(init({ site: "same" })).toBe(a);
