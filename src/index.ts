@@ -12,6 +12,7 @@ import {
   isHandoffHost,
   isValidEventName,
   normalizeGroup,
+  normalizeGroupId,
   normalizeIdentity,
   normalizeProperties,
   landingPayload,
@@ -44,6 +45,7 @@ export type {
   Properties,
   Touch,
   TouchRecord,
+  UngroupPayload,
 } from "./touch";
 
 /**
@@ -102,6 +104,10 @@ export type Beacon = {
    * `track` on this page (or as soon as one arrives); every later `track`
    * on the page carries the group id. */
   group: (id: string | number, traits?: Record<string, unknown> | null) => void;
+  /** Say the identified person left that account (a self-service "leave
+   * team", or deleting it). Sent like `group`; later tracks stop carrying
+   * the id. Removals done by someone else belong server-side. */
+  ungroup: (id: string | number) => void;
   /** The site token this beacon reports for. */
   site: string;
   /** Stop reporting and remove the navigation hooks. */
@@ -116,8 +122,10 @@ type BalladGlobal = {
   ) => void;
   identify?: (identity: Identity | null | undefined) => void;
   group?: (id: string | number, traits?: Record<string, unknown> | null) => void;
+  ungroup?: (id: string | number) => void;
   /** Calls made before init: `[["track", "signup", { email }]]`,
-   * `[["identify", { email }]]`, `[["group", "ws_1", { name }]]`. */
+   * `[["identify", { email }]]`, `[["group", "ws_1", { name }]]`,
+   * `[["ungroup", "ws_1"]]`. */
   q: unknown[][];
 };
 
@@ -247,11 +255,18 @@ export function init(options: BeaconOptions): Beacon | null {
   let lastIdentity: Identity | null = null;
   let currentGroup: string | null = null;
   let pendingGroup: Group | null = null;
+  const pendingUngroups: string[] = [];
   const flushGroup = () => {
-    if (!pendingGroup || !lastIdentity || gpc) return;
-    const g = pendingGroup;
-    pendingGroup = null;
-    send({ type: "group", path: location.pathname, group: g, identity: lastIdentity });
+    if (!lastIdentity || gpc) return;
+    if (pendingGroup) {
+      const g = pendingGroup;
+      pendingGroup = null;
+      send({ type: "group", path: location.pathname, group: g, identity: lastIdentity });
+    }
+    while (pendingUngroups.length) {
+      const id = pendingUngroups.shift() as string;
+      send({ type: "ungroup", path: location.pathname, group: id, identity: lastIdentity });
+    }
   };
   const track = (
     name: string,
@@ -290,6 +305,15 @@ export function init(options: BeaconOptions): Beacon | null {
     currentGroup = g.id;
     if (gpc) return;
     pendingGroup = g;
+    flushGroup();
+  };
+  const ungroup = (id: string | number) => {
+    const gid = normalizeGroupId(id);
+    if (!gid) return;
+    if (currentGroup === gid) currentGroup = null;
+    if (pendingGroup?.id === gid) pendingGroup = null;
+    if (gpc) return;
+    pendingUngroups.push(gid);
     flushGroup();
   };
   const onClick = (e: Event) => {
@@ -336,7 +360,7 @@ export function init(options: BeaconOptions): Beacon | null {
   // `window.ballad.track("signup")` in existing code keeps working, and
   // calls queued before init are replayed.
   const queued = safe(() => window.ballad?.q ?? [], []);
-  window.ballad = { track, identify, group, q: [] };
+  window.ballad = { track, identify, group, ungroup, q: [] };
   for (const call of queued)
     safe(() => {
       if (!Array.isArray(call)) return;
@@ -349,6 +373,7 @@ export function init(options: BeaconOptions): Beacon | null {
       else if (call[0] === "identify") identify(normalizeIdentity(call[1]));
       else if (call[0] === "group")
         group(call[1] as string, call[2] as Record<string, unknown> | null);
+      else if (call[0] === "ungroup") ungroup(call[1] as string);
     }, undefined);
 
   const beacon: Beacon = {
@@ -356,6 +381,7 @@ export function init(options: BeaconOptions): Beacon | null {
     track,
     identify,
     group,
+    ungroup,
     destroy: () => {
       safe(() => {
         if (trackNavigation) {
@@ -442,10 +468,28 @@ export function identify(identity: Identity | null | undefined): void {
   }, undefined);
 }
 
+/**
+ * Say the identified person left an account: `ungroup("ws_1")`. The
+ * opposite of `group`, for the flows that happen in the leaver's own
+ * browser — leaving a team, deleting a workspace. A removal done by an
+ * admin belongs server-side (`ungroup_contact`). Queued before `init`.
+ */
+export function ungroup(id: string | number): void {
+  if (current) {
+    current.ungroup(id);
+    return;
+  }
+  if (typeof window === "undefined") return;
+  safe(() => {
+    const g = (window.ballad ??= { track: () => {}, q: [] });
+    g.q.push(["ungroup", id]);
+  }, undefined);
+}
+
 /** The running beacon, if any. */
 export function getBeacon(): Beacon | null {
   return current;
 }
 
-export const ballad = { init, track, identify, group, getBeacon };
+export const ballad = { init, track, identify, group, ungroup, getBeacon };
 export default ballad;

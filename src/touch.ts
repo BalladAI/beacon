@@ -63,6 +63,13 @@ export type GroupPayload = {
   group: Group;
   identity: Identity;
 };
+/** The identified person left this account (recorded as `left_account`). */
+export type UngroupPayload = {
+  type: "ungroup";
+  path: string;
+  group: string;
+  identity: Identity;
+};
 /** Who a returning visitor is (on login). Carries the touch the browser kept
  * so Ballad can backfill the person; nothing is counted. */
 export type IdentifyPayload = {
@@ -78,7 +85,8 @@ export type Payload =
   | PageviewPayload
   | ConversionPayload
   | IdentifyPayload
-  | GroupPayload;
+  | GroupPayload
+  | UngroupPayload;
 
 /** The events URL for a site token, on Ballad's app origin (or a mirror). */
 export function eventsUrl(endpoint: string, site: string): string {

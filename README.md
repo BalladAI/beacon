@@ -103,6 +103,16 @@ group(workspace.id, { name: workspace.name, plan: workspace.plan });
 
 The group is sent with the identity last passed to `identify` or `track` on the page — before or after, the beacon waits for one — and every later `track` on the page carries the account id, so "created a workspace, never published" reads per account rather than per email. A later `group` call with new traits merges them. Under Global Privacy Control nothing is sent. Script tag: `window.ballad.group(id, { name })`.
 
+When the person leaves — a self-service "leave team", or deleting the workspace from their own browser — call the opposite:
+
+```ts
+import { ungroup } from "@balladlabs/beacon";
+
+ungroup(workspace.id);
+```
+
+Ballad records `left_account` in that account and drops the membership; later `track` calls on the page stop carrying the id. A removal done by someone else never passes through the leaver's browser, so report those server-side with the `ungroup_contact` agent tool instead.
+
 ## Say who a returning visitor is
 
 Signups the beacon saw before your form passed an email — or any visitor who
@@ -148,7 +158,7 @@ keeps it. Nothing is carried under Global Privacy Control. Script tag:
 - A `landing` once per tab, with the page, any `?ref=` token from a Ballad link, and the referring site's host.
 - A `pageview` on each later navigation.
 - A `conversion` with the visitor's first and last touch, so Ballad can attribute it — and an identity (email, name, company), properties, and the current account id only when you pass them.
-- A `group` (the identified person belongs to this account, with its traits) only when you call `group`.
+- A `group` (the identified person belongs to this account, with its traits) only when you call `group`, and an `ungroup` (they left it) only when you call `ungroup`.
 
 Nothing else. No user agent, no IP, no identifier you didn't choose to send. The first and last touch live in `localStorage` on your own domain for 90 days. Visitors with Global Privacy Control on are never stored.
 

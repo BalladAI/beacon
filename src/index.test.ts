@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getBeacon, group, identify, init, track } from "./index";
+import { getBeacon, group, identify, init, track, ungroup } from "./index";
 import { encodeHandoff, SESSION_KEY, STORAGE_KEY } from "./touch";
 
 /** The beacon against jsdom: what it sends, and when. */
@@ -258,5 +258,37 @@ describe("beacon", () => {
     track("signup", null, { plan: "pro" });
     expect(sent.map((p) => (p as { type: string }).type)).toEqual(["conversion"]);
     expect(sent[0]).not.toHaveProperty("identity");
+  });
+
+  it("ungroup sends the departure with the identity and stops stamping the id", () => {
+    init({ site: "site-1" });
+    sent.length = 0;
+    identify({ email: "a@example.com" });
+    group("ws_1", { name: "Acme" });
+    ungroup("ws_1");
+    track("published");
+    expect(sent.map((p) => (p as { type: string }).type)).toEqual([
+      "identify",
+      "group",
+      "ungroup",
+      "conversion",
+    ]);
+    expect(sent[2]).toEqual({
+      type: "ungroup",
+      path: "/",
+      group: "ws_1",
+      identity: { email: "a@example.com" },
+    });
+    expect(sent[3]).not.toHaveProperty("group");
+  });
+
+  it("ungroup waits for an identity and queues before init", () => {
+    ungroup("ws_9");
+    init({ site: "site-1" });
+    sent.length = 0;
+    expect(sent).toEqual([]);
+    track("signup", { email: "b@example.com" });
+    expect(sent.map((p) => (p as { type: string }).type)).toEqual(["conversion", "ungroup"]);
+    expect(sent[1]).toMatchObject({ group: "ws_9", identity: { email: "b@example.com" } });
   });
 });
