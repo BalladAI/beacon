@@ -82,6 +82,27 @@ The rule for what an identified form sends, exactly: the email from `input[type=
 
 `window.ballad.track("signup")` keeps working too, for code written against the script tag.
 
+### Properties
+
+A third argument carries flat properties — strings, numbers and booleans, up to 20 keys — that a Ballad segment can read ("did `upgraded` where plan = pro, within 30 days"):
+
+```ts
+track("upgraded", { email: user.email }, { plan: "pro", seats: 3 });
+```
+
+## Accounts
+
+If one person can belong to several companies, teams or workspaces in your product, tell Ballad which one an event happened in. `group` is Segment's idea: your own id for the account, a name, and traits set once for everyone in it.
+
+```ts
+import { group, identify } from "@balladlabs/beacon";
+
+identify({ email: user.email });
+group(workspace.id, { name: workspace.name, plan: workspace.plan });
+```
+
+The group is sent with the identity last passed to `identify` or `track` on the page — before or after, the beacon waits for one — and every later `track` on the page carries the account id, so "created a workspace, never published" reads per account rather than per email. A later `group` call with new traits merges them. Under Global Privacy Control nothing is sent. Script tag: `window.ballad.group(id, { name })`.
+
 ## Say who a returning visitor is
 
 Signups the beacon saw before your form passed an email — or any visitor who
@@ -126,7 +147,8 @@ keeps it. Nothing is carried under Global Privacy Control. Script tag:
 
 - A `landing` once per tab, with the page, any `?ref=` token from a Ballad link, and the referring site's host.
 - A `pageview` on each later navigation.
-- A `conversion` with the visitor's first and last touch, so Ballad can attribute it — and an identity (email, name, company) only when you pass one.
+- A `conversion` with the visitor's first and last touch, so Ballad can attribute it — and an identity (email, name, company), properties, and the current account id only when you pass them.
+- A `group` (the identified person belongs to this account, with its traits) only when you call `group`.
 
 Nothing else. No user agent, no IP, no identifier you didn't choose to send. The first and last touch live in `localStorage` on your own domain for 90 days. Visitors with Global Privacy Control on are never stored.
 

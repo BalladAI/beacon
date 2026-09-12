@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getBeacon, init, track } from "./index";
+import { getBeacon, group, identify, init, track } from "./index";
 import { encodeHandoff, SESSION_KEY, STORAGE_KEY } from "./touch";
 
 /** The beacon against jsdom: what it sends, and when. */
@@ -194,5 +194,69 @@ describe("beacon", () => {
     const b = init({ site: "other" });
     expect(b).not.toBe(a);
     expect(getBeacon()).toBe(b);
+  });
+
+  it("sends properties with a conversion, and the current group id", () => {
+    init({ site: "site-1" });
+    sent.length = 0;
+    group("ws_1", { name: "Acme", plan: "pro", nested: { no: 1 } });
+    // No identity yet: the group waits; the track still carries the id.
+    expect(sent).toEqual([]);
+    track("published", null, { count: 3, ok: true, "bad key": 1 });
+    expect(sent[0]).toMatchObject({
+      type: "conversion",
+      name: "published",
+      properties: { count: 3, ok: true },
+      group: "ws_1",
+    });
+    expect((sent[0] as { properties: object }).properties).not.toHaveProperty("bad key");
+  });
+
+  it("sends the group once an identity is known, with lifted name and traits", () => {
+    init({ site: "site-1" });
+    sent.length = 0;
+    group(42, { name: " Acme ", plan: "pro" });
+    identify({ email: "A@Example.com" });
+    expect(sent).toHaveLength(2);
+    expect(sent[0]).toMatchObject({
+      type: "identify",
+      path: "/",
+      identity: { email: "a@example.com" },
+    });
+    expect(sent[1]).toEqual({
+      type: "group",
+      path: "/",
+      group: { id: "42", name: "Acme", traits: { plan: "pro" } },
+      identity: { email: "a@example.com" },
+    });
+    // Identity first, then group: sent immediately.
+    group("ws_2");
+    expect(sent[2]).toMatchObject({ type: "group", group: { id: "ws_2" } });
+  });
+
+  it("queues group and track-with-properties before init", () => {
+    group("ws_1", { name: "Acme" });
+    track("signup", { email: "a@example.com" }, { plan: "pro" });
+    init({ site: "site-1" });
+    const types = sent.map((p) => (p as { type: string }).type);
+    expect(types).toEqual(["landing", "conversion", "group"]);
+    expect(sent[1]).toMatchObject({ properties: { plan: "pro" }, group: "ws_1" });
+  });
+
+  it("drops a malformed group id and nothing under GPC", () => {
+    init({ site: "site-1" });
+    sent.length = 0;
+    group("has space");
+    identify({ email: "a@example.com" });
+    expect(sent).toHaveLength(1);
+    getBeacon()?.destroy();
+    vi.stubGlobal("navigator", { ...navigator, globalPrivacyControl: true });
+    init({ site: "site-1" });
+    sent.length = 0;
+    group("ws_1");
+    identify({ email: "a@example.com" });
+    track("signup", null, { plan: "pro" });
+    expect(sent.map((p) => (p as { type: string }).type)).toEqual(["conversion"]);
+    expect(sent[0]).not.toHaveProperty("identity");
   });
 });

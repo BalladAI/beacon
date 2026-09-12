@@ -4,17 +4,21 @@ import {
   DEFAULT_ENDPOINT,
   encodeHandoff,
   eventsUrl,
+  type Group,
   HANDOFF_PARAM,
   type Identity,
   identityFromForm,
   identifyPayload,
   isHandoffHost,
   isValidEventName,
+  normalizeGroup,
   normalizeIdentity,
+  normalizeProperties,
   landingPayload,
   nextTouchRecord,
   parseTouchRecord,
   type Payload,
+  type Properties,
   referrerHost,
   SESSION_KEY,
   shouldRecordTouch,
@@ -30,11 +34,14 @@ export {
 } from "./touch";
 export type {
   ConversionPayload,
+  Group,
+  GroupPayload,
   Identity,
   IdentifyPayload,
   LandingPayload,
   PageviewPayload,
   Payload,
+  Properties,
   Touch,
   TouchRecord,
 } from "./touch";
@@ -79,12 +86,22 @@ export type BeaconOptions = {
 
 export type Beacon = {
   /** Report a named conversion ("signup", "demo_request"…), optionally
-   * with who converted. */
-  track: (name: string, identity?: Identity | null) => void;
+   * with who converted and flat properties ({plan: "pro"}). */
+  track: (
+    name: string,
+    identity?: Identity | null,
+    properties?: Properties | null,
+  ) => void;
   /** Say who a returning visitor is (call on login). The touch stored in
    * their browser backfills the person in Ballad; nothing is counted.
    * Under Global Privacy Control nothing is sent. */
   identify: (identity: Identity | null | undefined) => void;
+  /** Say which account (company, team, workspace — Segment's `group`) the
+   * identified person belongs to, by your own id, with traits set once for
+   * everyone in it. Sent with the identity last passed to `identify` or
+   * `track` on this page (or as soon as one arrives); every later `track`
+   * on the page carries the group id. */
+  group: (id: string | number, traits?: Record<string, unknown> | null) => void;
   /** The site token this beacon reports for. */
   site: string;
   /** Stop reporting and remove the navigation hooks. */
@@ -92,10 +109,15 @@ export type Beacon = {
 };
 
 type BalladGlobal = {
-  track: (name: string, identity?: Identity | null) => void;
+  track: (
+    name: string,
+    identity?: Identity | null,
+    properties?: Properties | null,
+  ) => void;
   identify?: (identity: Identity | null | undefined) => void;
+  group?: (id: string | number, traits?: Record<string, unknown> | null) => void;
   /** Calls made before init: `[["track", "signup", { email }]]`,
-   * `[["identify", { email }]]`. */
+   * `[["identify", { email }]]`, `[["group", "ws_1", { name }]]`. */
   q: unknown[][];
 };
 
@@ -220,26 +242,55 @@ export function init(options: BeaconOptions): Beacon | null {
     }, undefined);
   }
 
-  // 3. Conversions.
-  const track = (name: string, identity?: Identity | null) => {
+  // 3. Conversions. The identity last passed on this page is remembered
+  // (in memory only) so a `group` call can be sent with it.
+  let lastIdentity: Identity | null = null;
+  let currentGroup: string | null = null;
+  let pendingGroup: Group | null = null;
+  const flushGroup = () => {
+    if (!pendingGroup || !lastIdentity || gpc) return;
+    const g = pendingGroup;
+    pendingGroup = null;
+    send({ type: "group", path: location.pathname, group: g, identity: lastIdentity });
+  };
+  const track = (
+    name: string,
+    identity?: Identity | null,
+    properties?: Properties | null,
+  ) => {
     if (!isValidEventName(name)) return;
     // Under Global Privacy Control nothing identifying leaves the page —
     // not even an identity the site passed. The conversion still counts,
     // anonymously; the site can sync its own signup records server-side.
+    const who = gpc ? null : normalizeIdentity(identity);
+    if (who) lastIdentity = who;
     send(
       conversionPayload({
         name,
         path: location.pathname,
         record: load(),
-        identity: gpc ? null : normalizeIdentity(identity),
+        identity: who,
+        properties: normalizeProperties(properties),
+        group: currentGroup,
       }),
     );
+    if (who) flushGroup();
   };
   const identify = (identity: Identity | null | undefined) => {
     if (gpc) return;
     const who = normalizeIdentity(identity);
     if (!who) return;
+    lastIdentity = who;
     send(identifyPayload({ path: location.pathname, record: load(), identity: who }));
+    flushGroup();
+  };
+  const group = (id: string | number, traits?: Record<string, unknown> | null) => {
+    const g = normalizeGroup(id, traits);
+    if (!g) return;
+    currentGroup = g.id;
+    if (gpc) return;
+    pendingGroup = g;
+    flushGroup();
   };
   const onClick = (e: Event) => {
     safe(() => {
@@ -285,18 +336,26 @@ export function init(options: BeaconOptions): Beacon | null {
   // `window.ballad.track("signup")` in existing code keeps working, and
   // calls queued before init are replayed.
   const queued = safe(() => window.ballad?.q ?? [], []);
-  window.ballad = { track, identify, q: [] };
+  window.ballad = { track, identify, group, q: [] };
   for (const call of queued)
     safe(() => {
       if (!Array.isArray(call)) return;
-      if (call[0] === "track") track(String(call[1]), normalizeIdentity(call[2]));
+      if (call[0] === "track")
+        track(
+          String(call[1]),
+          normalizeIdentity(call[2]),
+          normalizeProperties(call[3]),
+        );
       else if (call[0] === "identify") identify(normalizeIdentity(call[1]));
+      else if (call[0] === "group")
+        group(call[1] as string, call[2] as Record<string, unknown> | null);
     }, undefined);
 
   const beacon: Beacon = {
     site,
     track,
     identify,
+    group,
     destroy: () => {
       safe(() => {
         if (trackNavigation) {
@@ -324,15 +383,46 @@ export function init(options: BeaconOptions): Beacon | null {
  * server) the call is queued and replayed once the beacon starts, so a
  * signup handler never has to know whether the beacon loaded first.
  */
-export function track(name: string, identity?: Identity | null): void {
+export function track(
+  name: string,
+  identity?: Identity | null,
+  properties?: Properties | null,
+): void {
   if (current) {
-    current.track(name, identity);
+    current.track(name, identity, properties);
     return;
   }
   if (typeof window === "undefined") return;
   safe(() => {
     const g = (window.ballad ??= { track: () => {}, q: [] });
-    g.q.push(identity ? ["track", name, identity] : ["track", name]);
+    g.q.push(
+      properties
+        ? ["track", name, identity ?? null, properties]
+        : identity
+          ? ["track", name, identity]
+          : ["track", name],
+    );
+  }, undefined);
+}
+
+/**
+ * Say which account the identified person belongs to (Segment's `group`):
+ * `group("ws_1", { name: "Acme", plan: "pro" })`. Call `identify` (or a
+ * `track` with an identity) on the same page — the group is sent with that
+ * identity, before or after. Queued before `init` like `track`.
+ */
+export function group(
+  id: string | number,
+  traits?: Record<string, unknown> | null,
+): void {
+  if (current) {
+    current.group(id, traits);
+    return;
+  }
+  if (typeof window === "undefined") return;
+  safe(() => {
+    const g = (window.ballad ??= { track: () => {}, q: [] });
+    g.q.push(traits ? ["group", id, traits] : ["group", id]);
   }, undefined);
 }
 
@@ -357,5 +447,5 @@ export function getBeacon(): Beacon | null {
   return current;
 }
 
-export const ballad = { init, track, identify, getBeacon };
+export const ballad = { init, track, identify, group, getBeacon };
 export default ballad;

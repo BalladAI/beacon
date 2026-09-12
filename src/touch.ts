@@ -37,6 +37,14 @@ export type PageviewPayload = { type: "pageview"; path: string };
  * already has, optionally a name and company. Sent only when passed. */
 export type Identity = { email: string; name?: string; company?: string };
 
+/** Flat event properties, or an account's traits: strings, numbers and
+ * booleans, at most 20 keys. */
+export type Properties = Record<string, string | number | boolean>;
+
+/** An account (Segment's `group`): the company, team or workspace the
+ * person belongs to in your product, by your own id. */
+export type Group = { id: string; name?: string; traits?: Properties };
+
 export type ConversionPayload = {
   type: "conversion";
   name: string;
@@ -44,6 +52,16 @@ export type ConversionPayload = {
   first?: Touch;
   last?: Touch;
   identity?: Identity;
+  properties?: Properties;
+  /** The account the conversion happened in (the id passed to `group`). */
+  group?: string;
+};
+/** The identified person belongs to this account. Nothing is counted. */
+export type GroupPayload = {
+  type: "group";
+  path: string;
+  group: Group;
+  identity: Identity;
 };
 /** Who a returning visitor is (on login). Carries the touch the browser kept
  * so Ballad can backfill the person; nothing is counted. */
@@ -59,7 +77,8 @@ export type Payload =
   | LandingPayload
   | PageviewPayload
   | ConversionPayload
-  | IdentifyPayload;
+  | IdentifyPayload
+  | GroupPayload;
 
 /** The events URL for a site token, on Ballad's app origin (or a mirror). */
 export function eventsUrl(endpoint: string, site: string): string {
@@ -137,6 +156,8 @@ export function conversionPayload(params: {
   path: string;
   record: TouchRecord | null;
   identity?: Identity | null;
+  properties?: Properties | null;
+  group?: string | null;
 }): ConversionPayload {
   return {
     type: "conversion",
@@ -144,7 +165,57 @@ export function conversionPayload(params: {
     path: params.path,
     ...(params.record ? { first: params.record.first, last: params.record.last } : {}),
     ...(params.identity ? { identity: params.identity } : {}),
+    ...(params.properties ? { properties: params.properties } : {}),
+    ...(params.group ? { group: params.group } : {}),
   };
+}
+
+const KEY_RE = /^[a-z][a-z0-9_]{0,39}$/i;
+export const GROUP_ID_RE = /^[\w.:@+-]{1,120}$/;
+
+/** Flat properties only: strings (trimmed, 200 chars), finite numbers and
+ * booleans, at most 20 keys with identifier-like names. */
+export function normalizeProperties(raw: unknown): Properties | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const out: Properties = {};
+  let n = 0;
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (n >= 20) break;
+    if (!KEY_RE.test(k)) continue;
+    if (typeof v === "string") {
+      const s = trim(v, 200);
+      if (!s) continue;
+      out[k] = s;
+    } else if (typeof v === "number") {
+      if (!Number.isFinite(v)) continue;
+      out[k] = v;
+    } else if (typeof v === "boolean") out[k] = v;
+    else continue;
+    n++;
+  }
+  return n ? out : null;
+}
+
+export function normalizeGroupId(raw: unknown): string | null {
+  if (typeof raw !== "string" && typeof raw !== "number") return null;
+  const id = String(raw).trim();
+  return GROUP_ID_RE.test(id) ? id : null;
+}
+
+/** `group("ws_1", { name: "Acme", plan: "pro" })`: the name is lifted out,
+ * the rest are traits. */
+export function normalizeGroup(id: unknown, traits?: unknown): Group | null {
+  const gid = normalizeGroupId(id);
+  if (!gid) return null;
+  const out: Group = { id: gid };
+  if (traits && typeof traits === "object") {
+    const { name, ...rest } = traits as Record<string, unknown>;
+    const n = trim(name, 120);
+    if (n) out.name = n;
+    const t = normalizeProperties(rest);
+    if (t) out.traits = t;
+  }
+  return out;
 }
 
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[a-z]{2,}$/i;
