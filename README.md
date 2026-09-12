@@ -157,6 +157,7 @@ keeps it. Nothing is carried under Global Privacy Control. Script tag:
 
 - A `landing` once per tab, with the page, any `?ref=` token from a Ballad link, and the referring site's host.
 - A `pageview` on each later navigation.
+- Once you have passed an identity on the page (`identify`, or `track` with one, queued before load included), the landing and later pageviews on that page carry it too, so a known person's reads show on their record and "last seen" moves. It is held in memory for the page only; nothing identifying is ever written to the browser.
 - A `conversion` with the visitor's first and last touch, so Ballad can attribute it — and an identity (email, name, company), properties, and the current account id only when you pass them.
 - A `group` (the identified person belongs to this account, with its traits) only when you call `group`, and an `ungroup` (they left it) only when you call `ungroup`.
 

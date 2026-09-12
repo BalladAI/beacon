@@ -239,8 +239,11 @@ describe("beacon", () => {
     track("signup", { email: "a@example.com" }, { plan: "pro" });
     init({ site: "site-1" });
     const types = sent.map((p) => (p as { type: string }).type);
-    expect(types).toEqual(["landing", "conversion", "group"]);
-    expect(sent[1]).toMatchObject({ properties: { plan: "pro" }, group: "ws_1" });
+    // The queued identity is known before the replay, so the group goes
+    // out first and the landing itself is identified.
+    expect(types).toEqual(["landing", "group", "conversion"]);
+    expect(sent[0]).toMatchObject({ identity: { email: "a@example.com" } });
+    expect(sent[2]).toMatchObject({ properties: { plan: "pro" }, group: "ws_1" });
   });
 
   it("drops a malformed group id and nothing under GPC", () => {
@@ -290,5 +293,33 @@ describe("beacon", () => {
     track("signup", { email: "b@example.com" });
     expect(sent.map((p) => (p as { type: string }).type)).toEqual(["conversion", "ungroup"]);
     expect(sent[1]).toMatchObject({ group: "ws_9", identity: { email: "b@example.com" } });
+  });
+
+  it("pageviews carry the page's identity once one was passed, never under GPC", () => {
+    init({ site: "site-1" });
+    sent.length = 0;
+    history.pushState(null, "", "/a");
+    expect(sent[0]).toEqual({ type: "pageview", path: "/a" });
+    identify({ email: "a@example.com" });
+    history.pushState(null, "", "/b");
+    expect(sent[2]).toEqual({
+      type: "pageview",
+      path: "/b",
+      identity: { email: "a@example.com" },
+    });
+    expect(localStorage.getItem(STORAGE_KEY) ?? "").not.toContain("example.com");
+    getBeacon()?.destroy();
+    vi.stubGlobal("navigator", { ...navigator, globalPrivacyControl: true });
+    init({ site: "site-1" });
+    sent.length = 0;
+    identify({ email: "a@example.com" });
+    history.pushState(null, "", "/c");
+    expect(sent).toEqual([{ type: "pageview", path: "/c" }]);
+  });
+
+  it("a queued identify makes the landing itself identified", () => {
+    identify({ email: "q@example.com" });
+    init({ site: "site-1" });
+    expect(sent[0]).toMatchObject({ type: "landing", identity: { email: "q@example.com" } });
   });
 });

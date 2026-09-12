@@ -8,6 +8,8 @@ import {
   HANDOFF_PARAM,
   type Identity,
   identityFromForm,
+  type LandingPayload,
+  type PageviewPayload,
   identifyPayload,
   isHandoffHost,
   isValidEventName,
@@ -219,18 +221,35 @@ export function init(options: BeaconOptions): Beacon | null {
     save(nextTouchRecord(existing, touch));
   }
 
+  // The identity last passed on this page (identify, or a track with one),
+  // in memory only. A call queued before init counts, so the landing below
+  // can already carry it; every later pageview on the page does too.
+  let lastIdentity: Identity | null = null;
+  safe(() => {
+    for (const call of window.ballad?.q ?? []) {
+      if (!Array.isArray(call)) continue;
+      const raw = call[0] === "identify" ? call[1] : call[0] === "track" ? call[2] : null;
+      const who = raw ? normalizeIdentity(raw) : null;
+      if (who) lastIdentity = who;
+    }
+  }, undefined);
+  const withIdentity = (
+    p: LandingPayload | PageviewPayload,
+  ): LandingPayload | PageviewPayload =>
+    lastIdentity && !gpc ? { ...p, identity: lastIdentity } : p;
+
   // 2. Landing once per tab, pageviews after.
   const landed = safe(() => !!sessionStorage.getItem(SESSION_KEY), false);
   safe(() => sessionStorage.setItem(SESSION_KEY, "1"), undefined);
-  if (landed) send({ type: "pageview", path: location.pathname });
-  else send(landingPayload({ path: location.pathname, ref, host }));
+  if (landed) send(withIdentity({ type: "pageview", path: location.pathname }));
+  else send(withIdentity(landingPayload({ path: location.pathname, ref, host })));
 
   let lastPath = location.pathname;
   const onNavigate = () => {
     safe(() => {
       if (location.pathname !== lastPath) {
         lastPath = location.pathname;
-        send({ type: "pageview", path: lastPath });
+        send(withIdentity({ type: "pageview", path: lastPath }));
       }
     }, undefined);
   };
@@ -250,9 +269,7 @@ export function init(options: BeaconOptions): Beacon | null {
     }, undefined);
   }
 
-  // 3. Conversions. The identity last passed on this page is remembered
-  // (in memory only) so a `group` call can be sent with it.
-  let lastIdentity: Identity | null = null;
+  // 3. Conversions.
   let currentGroup: string | null = null;
   let pendingGroup: Group | null = null;
   const pendingUngroups: string[] = [];

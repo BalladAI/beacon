@@ -26,13 +26,21 @@ export const SESSION_KEY = "ballad:landed";
 export const TOUCH_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 export const DEFAULT_ENDPOINT = "https://app.balladlabs.com";
 
+/** A landing or pageview carries the page's identity once the site has
+ * passed one (identify, or a track with one), so a known person's reads
+ * sit on their record. Never stored; never under Global Privacy Control. */
 export type LandingPayload = {
   type: "landing";
   path: string;
   ref?: string;
   referrer?: string;
+  identity?: Identity;
 };
-export type PageviewPayload = { type: "pageview"; path: string };
+export type PageviewPayload = {
+  type: "pageview";
+  path: string;
+  identity?: Identity;
+};
 /** Who converted, when the site chooses to say: the email its signup form
  * already has, optionally a name and company. Sent only when passed. */
 export type Identity = { email: string; name?: string; company?: string };
@@ -150,12 +158,14 @@ export function landingPayload(params: {
   path: string;
   ref: string | null;
   host: string;
+  identity?: Identity | null;
 }): LandingPayload {
   return {
     type: "landing",
     path: params.path,
     ...(params.ref ? { ref: params.ref } : {}),
     ...(params.host ? { referrer: params.host } : {}),
+    ...(params.identity ? { identity: params.identity } : {}),
   };
 }
 
